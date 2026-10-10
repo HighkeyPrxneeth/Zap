@@ -1,10 +1,9 @@
 #include <windows.h>
-#include <iostream>
 #include <cstring>
 
 template <typename T>
-T fromBytes(const BYTE *data, int startPtr) {
+T fromBytes(const BYTE *data, int startIdx) {
 	T result;
-	std::memcpy(&result, data + startPtr, sizeof(T));
+	std::memcpy(&result, data + startIdx, sizeof(T));
 	return result;
 }
