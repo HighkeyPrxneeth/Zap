@@ -8,6 +8,7 @@
 #include <winioctl.h>
 #include <winnt.h>
 #include <vector>
+#include <unordered_map>
 
 #include "utils/binary.cpp"
 
@@ -23,13 +24,10 @@ struct FileEntry {
 	std::wstring FileName;
 };
 
-struct FileTreeNode {
-	FileEntry entry;
-	int *parent;
-};
 
 class FileEntryDict {
 	std::vector<FileEntry> fileEntries;
+	std::unordered_map<DWORDLONG, std::vector<DWORDLONG>> childrenByParent;
 
 	public:
 		FileEntryDict() {
@@ -38,6 +36,10 @@ class FileEntryDict {
 
 		FileEntryDict(std::vector<FileEntry> entries) {
 			this->fileEntries = entries;
+		}
+
+		unsigned long long int getSize() {
+			return this->fileEntries.size();
 		}
 
 		void print() {
@@ -70,8 +72,15 @@ class FileEntryDict {
 			}
 		}
 
-		unsigned long long int getSize() {
-			return this->fileEntries.size();
+		void createFileTree() {
+			for (unsigned long long int i = 0; i < this->getSize(); i++) {
+				this->childrenByParent[this->fileEntries[i].ParentFileReferenceNumber]
+					.push_back(this->fileEntries[i].FileReferenceNumber);
+			}
+		}
+
+		std::size_t getParentCount() const {
+    		return this->childrenByParent.size();
 		}
 };
 
@@ -188,6 +197,12 @@ int main() {
 	}
 
 	std::cout << "Total Size: " << dict.getSize() << std::endl;
+
+	dict.createFileTree();
+
+	std::cout << "Total entries: " << dict.getSize() << '\n';
+	std::cout << "Distinct parent references: "
+          << dict.getParentCount() << '\n';
 
 	CloseHandle(h);
 
