@@ -27,7 +27,7 @@ struct FileEntry {
 
 class FileEntryDict {
 	std::vector<FileEntry> fileEntries;
-	std::unordered_map<DWORDLONG, std::vector<DWORDLONG>> childrenByParent;
+	std::unordered_map<DWORDLONG, std::vector<std::size_t>> childrenByParent;
 
 	public:
 		FileEntryDict() {
@@ -75,12 +75,77 @@ class FileEntryDict {
 		void createFileTree() {
 			for (unsigned long long int i = 0; i < this->getSize(); i++) {
 				this->childrenByParent[this->fileEntries[i].ParentFileReferenceNumber]
-					.push_back(this->fileEntries[i].FileReferenceNumber);
+					.push_back(i);
 			}
 		}
 
 		std::size_t getParentCount() const {
     		return this->childrenByParent.size();
+		}
+
+		std::vector<std::wstring> buildPaths() const {
+			const std::size_t n = fileEntries.size();
+		    std::vector<std::wstring> paths(n);
+		    std::vector<bool> visited(n, false);
+		    std::vector<std::size_t> pending;
+
+			const DWORDLONG rootRef = 0x0005000000000005ULL; // diagnostic value for this C: volume
+			auto rootChildren = childrenByParent.find(rootRef);
+
+			if (rootChildren == childrenByParent.end()) {
+			    std::cout << "No entries point to the C: root" << std::endl;
+			    return paths;
+			}
+
+			// add children of root's children directories to pending, i.e.,
+			// add root's children's value
+			for (std::size_t childIndex : rootChildren->second) {
+			    const FileEntry& child = fileEntries[childIndex];
+
+			    paths[childIndex] = L"C:\\" + child.FileName;
+			    visited[childIndex] = true;
+
+			    if (child.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+			        pending.push_back(childIndex);
+			    }
+			}
+
+			while (!pending.empty()) {
+				const std::size_t parentIndex = pending.back(); // .back is equivalent to peek() operation
+				pending.pop_back();
+
+				const FileEntry parent = fileEntries[parentIndex];
+
+				auto iter = childrenByParent.find(parent.FileReferenceNumber);
+
+				// skip the empty folders
+				if (iter == childrenByParent.end()) { // if the reference number is not there in childrenByParent, then it doesn't have any files in it
+					continue;
+				}
+
+				for (std::size_t childIndex : iter->second) { // iterate through the values, i.e., child indices
+					if (visited[childIndex]) {
+						continue;
+					}
+
+					const FileEntry child = fileEntries[childIndex];
+
+					// files at the root dont have any \ separator
+					if (paths[parentIndex] == L"C:\\") {
+						paths[childIndex] = paths[parentIndex] + child.FileName;
+					} else {
+						paths[childIndex] = paths[parentIndex] + L"\\" + child.FileName;
+					}
+
+					visited[childIndex] = true;
+
+					if (child.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+						pending.push_back(childIndex);
+					}
+				}
+			}
+
+			return paths;
 		}
 };
 
@@ -114,6 +179,18 @@ std::vector<FileEntry> getFiles(const BYTE *buffer, DWORD bytesReturned) {
 		const BYTE* nameData = buffer + currByte + FileNameOffset;
 		const WCHAR* name = reinterpret_cast<const WCHAR*>(nameData);
 		std::wstring FileName(name, FileNameLength / sizeof(WCHAR));
+
+		constexpr DWORDLONG MFT_RECORD_MASK = 0x0000FFFFFFFFFFFFULL;
+		WORD majorVersion = fromBytes<WORD>(buffer, recordStart + 4);
+
+		if ((FileReferenceNumber & MFT_RECORD_MASK) == 5) {
+		    std::wcout << L"Record 5: version=" << majorVersion
+		               << L" attributes=0x" << std::hex << FileAttributes
+		               << L" file=0x" << FileReferenceNumber
+		               << L" parent=0x" << ParentFileReferenceNumber
+		               << L" name=[" << FileName << L"]"
+		               << std::dec << L'\n';
+		}
 
 		currByte = recordStart + RecordLength;
 
@@ -203,6 +280,24 @@ int main() {
 	std::cout << "Total entries: " << dict.getSize() << '\n';
 	std::cout << "Distinct parent references: "
           << dict.getParentCount() << '\n';
+
+	std::vector<std::wstring> paths = dict.buildPaths();
+
+	std::size_t resolved = 0;
+
+	for (std::size_t i = 0; i < paths.size(); i++) {
+		if (paths[i].empty()) {
+			continue;
+		}
+		resolved++;
+
+		if (resolved <= 20) {
+			std::wcout << paths[i] << std::endl;
+		}
+	}
+
+	std::cout << "Resolved paths: " << resolved << std::endl;
+	std::cout << "Unresolved paths: " << paths.size() - resolved << std::endl;
 
 	CloseHandle(h);
 
